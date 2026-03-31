@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Council Incident Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f5f7fa;
+      color: #222;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #555;
+      margin-bottom: 24px;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .kpi-title {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    .kpi-value {
+      font-size: 30px;
+      font-weight: bold;
+    }
+
+    .section {
+      margin-bottom: 24px;
+    }
+
+    canvas {
+      max-height: 360px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid #eee;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    th {
+      background: #f0f3f7;
+    }
+
+    .footer {
+      margin-top: 18px;
+      color: #555;
+      font-size: 14px;
+    }
+
+    @media (max-width: 900px) {
+      .kpi-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 600px) {
+      .kpi-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Council Incident Dashboard</h1>
+    <div class="subtitle">Public dashboard for local service incidents</div>
+
+    <div class="kpi-grid">
+      <div class="card">
+        <div class="kpi-title">Total Incidents</div>
+        <div class="kpi-value" id="totalIncidents">0</div>
+      </div>
+      <div class="card">
+        <div class="kpi-title">Open Incidents</div>
+        <div class="kpi-value" id="openIncidents">0</div>
+      </div>
+      <div class="card">
+        <div class="kpi-title">Resolved Incidents</div>
+        <div class="kpi-value" id="resolvedIncidents">0</div>
+      </div>
+      <div class="card">
+        <div class="kpi-title">In Progress Incidents</div>
+        <div class="kpi-value" id="inProgressIncidents">0</div>
+      </div>
+    </div>
+
+    <div class="section card">
+      <h2>Incidents by Category</h2>
+      <canvas id="categoryChart"></canvas>
+    </div>
+
+    <div class="section">
+      <h2>Recent Records</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Incident ID</th>
+            <th>Reported Date</th>
+            <th>Suburb</th>
+            <th>Category</th>
+            <th>Status</th>
+            <th>Priority</th>
+          </tr>
+        </thead>
+        <tbody id="recentTableBody"></tbody>
+      </table>
+    </div>
+
+    <div class="footer" id="lastUpdated">Last updated: -</div>
+  </div>
+
+  <script>
+    async function loadCSV() {
+      const response = await fetch('curated-incidents.csv');
+      const csvText = await response.text();
+      const rows = csvText.trim().split('\n').map(row => row.split(','));
+
+      const headers = rows[0].map(h => h.trim());
+      const dataRows = rows.slice(1);
+
+      const incidents = dataRows.map(row => {
+        let obj = {};
+        headers.forEach((header, index) => {
+          obj[header.trim()] = (row[index] || '').trim();
+        });
+        return obj;
+      });
+
+      return incidents;
+    }
+
+    function normalizeStatus(status) {
+      return (status || '').toLowerCase().trim();
+    }
+
+    function buildDashboard(incidents) {
+      const total = incidents.length;
+      const open = incidents.filter(i => normalizeStatus(i.status) === 'open').length;
+      const resolved = incidents.filter(i => normalizeStatus(i.status) === 'resolved').length;
+      const inProgress = incidents.filter(i =>
+        normalizeStatus(i.status) === 'in progress' ||
+        normalizeStatus(i.status) === 'in-progress'
+      ).length;
+
+      document.getElementById('totalIncidents').textContent = total;
+      document.getElementById('openIncidents').textContent = open;
+      document.getElementById('resolvedIncidents').textContent = resolved;
+      document.getElementById('inProgressIncidents').textContent = inProgress;
+
+      const categoryCounts = {};
+      incidents.forEach(i => {
+        const category = i.category || 'Unknown';
+        categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+      });
+
+      const labels = Object.keys(categoryCounts);
+      const counts = Object.values(categoryCounts);
+
+      new Chart(document.getElementById('categoryChart'), {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Incidents',
+            data: counts
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              display: false
+            }
+          }
+        }
+      });
+
+      const sorted = [...incidents].sort((a, b) => {
+        return new Date(b.reported_date) - new Date(a.reported_date);
+      });
+
+      const recent = sorted.slice(0, 8);
+      const tbody = document.getElementById('recentTableBody');
+      tbody.innerHTML = '';
+
+      recent.forEach(i => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${i.incident_id || ''}</td>
+          <td>${i.reported_date || ''}</td>
+          <td>${i.suburb || ''}</td>
+          <td>${i.category || ''}</td>
+          <td>${i.status || ''}</td>
+          <td>${i.priority || ''}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('lastUpdated').textContent =
+        'Last updated: ' + new Date().toLocaleString();
+    }
+
+    async function init() {
+      try {
+        const incidents = await loadCSV();
+        buildDashboard(incidents);
+      } catch (error) {
+        console.error(error);
+        document.body.innerHTML = '<div class="container"><h2>Error loading dashboard data.</h2></div>';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
